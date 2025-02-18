@@ -1,53 +1,76 @@
-from fastapi import FastAPI, HTTPException, Query, Depends
-from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, func
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from typing import List, Optional
+from fastapi import FastAPI, Query, HTTPException, Depends
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Date, ForeignKey, DECIMAL, BigInteger
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
+from pydantic import BaseModel, EmailStr, condecimal
 
-class AppResponse(BaseModel):
-    AppId: str
-    AppName: str
-    Category: str
-    Rating: Optional[float]
-    RatingCount: Optional[int]
-    Installs: Optional[int]
-    Free: bool
-    Price: Optional[float]
-    ContentRating: Optional[str]
-
-    class Config:
-        orm_mode = True  
-DATABASE_URL = "mssql+pyodbc://localhost/GooglePlayStore?driver=SQL+Server+Native+Client+11.0"
-
-engine = create_engine(DATABASE_URL, connect_args={"trusted_connection": "yes"})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
+# Database Connection
+SQLALCHEMY_DATABASE_URL = "mssql+pyodbc://localhost/GooglePlayStore?driver=SQL+Server&Trusted_Connection=yes"
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
-class App(Base):
-    __tablename__ = 'Apps'
-
-    AppId = Column(String, primary_key=True, index=True)
-    AppName = Column(String)
-    Category = Column(String)
-    Rating = Column(Float, nullable=True)
-    RatingCount = Column(Integer, nullable=True)
-    Installs = Column(Integer, nullable=True)
-    Free = Column(Boolean)
-    Price = Column(Float, nullable=True)
-    ContentRating = Column(String, nullable=True)
+# Database Models
+class Developer(Base):
+    __tablename__ = "Developers"
+    DeveloperID = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    DeveloperName = Column(String(255), unique=True, nullable=False)
+    DeveloperEmail = Column(String(255))
+    DeveloperWebsite = Column(String(500))
+    apps = relationship("Apps", back_populates="developer")
 
 class Category(Base):
-    __tablename__ = 'Categories'
+    __tablename__ = "Categories"
+    CategoryID = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    CategoryName = Column(String(100), unique=True, nullable=False)
+    
+class App(Base):
+    __tablename__ = "Apps"
+    AppID = Column(String(255), primary_key=True)
+    AppName = Column(String(255), nullable=False)
+    Rating = Column(Float)
+    RatingCount = Column(BigInteger)
+    Installs = Column(BigInteger)
+    MinInstalls = Column(BigInteger)
+    MaxInstalls = Column(BigInteger)
+    Price = Column(DECIMAL(10,2))
+    Currency = Column(String(10))
+    Size = Column(String(50))
+    MinAndroid = Column(String(50))
+    DeveloperID = Column(Integer, ForeignKey("Developers.DeveloperID"))
+    ContentRating = Column(String(50))
+    PrivacyPolicy = Column(String(500))
+    Released = Column(Date)
+    LastUpdated = Column(Date)
+    ScrapedTime = Column(Date)
+    Free = Column(Boolean)
+    AdSupported = Column(Boolean)
+    InAppPurchases = Column(Boolean)
+    EditorsChoice = Column(Boolean)
+    developer = relationship("Developer", back_populates="apps")
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String)
+class AppCategory(Base):
+    __tablename__ = "AppCategories"
+    AppID = Column(String(255), ForeignKey("Apps.AppID"), primary_key=True)
+    CategoryID = Column(Integer, ForeignKey("Categories.CategoryID"), primary_key=True)
 
-app = FastAPI()
+# Pydantic Models
+class DeveloperCreate(BaseModel):
+    DeveloperName: str
+    DeveloperEmail: EmailStr
+    DeveloperWebsite: str
 
-DEFAULT_PAGE_SIZE = 100
+class AppCreate(BaseModel):
+    AppID: str
+    AppName: str
+    Rating: float
+    RatingCount: int
+    Installs: int
+    Price: condecimal(max_digits=10, decimal_places=2)
+    Currency: str
+    Free: bool
+    DeveloperID: int
 
+# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -55,75 +78,76 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/apps/", response_model=List[AppResponse])
-def get_apps(
-    category: str = Query(None, description="Filter by category"),
-    min_rating: float = Query(None, description="Minimum rating"),
-    max_price: float = Query(None, description="Maximum price"),
-    page: int = Query(1, description="Page number"),
-    page_size: int = Query(DEFAULT_PAGE_SIZE, description="Items per page"),
-    db: Session = Depends(get_db)
-):
-    query = db.query(App).join(Category, Category.name == App.Category)
+# FastAPI App
+app = FastAPI()
 
-    if category:
-        query = query.filter(Category.name == category)
-    if min_rating:
-        query = query.filter(App.Rating >= min_rating)
-    if max_price is not None:
-        query = query.filter(App.Price <= max_price)
-
-    total_count = query.count()
-    apps = query.offset((page - 1) * page_size).limit(page_size).all()
-    
-    return {
-        "total": total_count,
-        "page": page,
-        "page_size": page_size,
-        "apps": apps
-    }
-
-@app.get("/apps/ratings/")
-def get_ratings_analysis(db: Session = Depends(get_db)):
-    result = (
-        db.query(Category.name, func.avg(App.Rating).label("avg_rating"))
-        .join(App, App.Category == Category.name)
-        .group_by(Category.name)
-        .all()
-    )
-    return [{"category": row[0], "average_rating": row[1]} for row in result]
+@app.post("/developers/")
+def create_developer(dev: DeveloperCreate, db: Session = Depends(get_db)):
+    developer = Developer(**dev.dict())
+    db.add(developer)
+    db.commit()
+    db.refresh(developer)
+    return developer
 
 @app.post("/apps/")
-def add_app(app: App, db: Session = Depends(get_db)):
+def create_app(app_data: AppCreate, db: Session = Depends(get_db)):
+    app = App(**app_data.dict())
     db.add(app)
     db.commit()
     db.refresh(app)
-    return {"message": "اپلیکیشن با موفقیت اضافه شد"}
+    return app
+
+@app.get("/apps/{app_id}")
+def get_app(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(App).filter(App.AppID == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found")
+    return app
+
+@app.get("/apps/")
+def get_apps(
+    page: int = Query(1, alias="page", ge=1),
+    page_size: int = Query(10, alias="page_size", le=100),
+    category: str = None,
+    rating: float = None,
+    price: float = None,
+    content_rating: str = None,
+    db: Session = Depends(get_db)):
+    query = db.query(App)
+
+    if category:
+        query = query.filter(App.Category == category)
+    if rating:
+        query = query.filter(App.Rating >= rating)
+    if price:
+        query = query.filter(App.Price <= price)
+    if content_rating:
+        query = query.filter(App.ContentRating == content_rating)
+
+    query = query.order_by(App.LastUpdated.desc())  
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total": query.count(),
+        "apps": query.offset((page - 1) * page_size).limit(page_size).all()
+    }
+
+
+@app.get("/apps/{app_id}")
+def get_app(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(App).filter(App.AppID == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found")
+    return app
 
 @app.delete("/apps/{app_id}")
 def delete_app(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(App).filter(App.AppId == app_id).first()
-    if app is None:
+    app = db.query(App).filter(App.AppID == app_id).first()
+    if not app:
         raise HTTPException(status_code=404, detail="App not found")
     db.delete(app)
     db.commit()
-    return {"message": "اپلیکیشن با موفقیت حذف شد"}
+    return {"message": f"App {app_id} deleted successfully"}
 
-@app.put("/apps/{app_id}")
-def update_app(app_id: str, app: App, db: Session = Depends(get_db)):
-    existing_app = db.query(App).filter(App.AppId == app_id).first()
-    if existing_app is None:
-        raise HTTPException(status_code=404, detail="App not found")
-    
-    existing_app.AppName = app.AppName
-    existing_app.Category = app.Category
-    existing_app.Rating = app.Rating
-    existing_app.RatingCount = app.RatingCount
-    existing_app.Installs = app.Installs
-    existing_app.Free = app.Free
-    existing_app.Price = app.Price
-    existing_app.ContentRating = app.ContentRating
-    
-    db.commit()
-    db.refresh(existing_app)
-    return {"message": "اپلیکیشن با موفقیت به‌روزرسانی شد"}
+

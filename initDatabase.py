@@ -43,8 +43,8 @@ CREATE TABLE Categories (
 """)
 
 cursor.execute("""
-IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Apps2') BEGIN
-CREATE TABLE Apps2 (
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Apps') BEGIN
+CREATE TABLE Apps (
     AppID NVARCHAR(255) PRIMARY KEY,
     AppName NVARCHAR(255) NOT NULL,
     Rating FLOAT CHECK (Rating BETWEEN 0 AND 5),
@@ -68,17 +68,17 @@ CREATE TABLE Apps2 (
     EditorsChoice BIT,
     FOREIGN KEY (DeveloperID) REFERENCES Developers(DeveloperID),
 );
-CREATE INDEX idx_rating ON Apps2(Rating);
-CREATE INDEX idx_price ON Apps2(Price);
-CREATE INDEX idx_content_rating ON Apps2(ContentRating);
-CREATE INDEX idx_installs ON Apps2(Installs);
-CREATE INDEX idx_last_updated ON Apps2(LastUpdated);
+CREATE INDEX idx_rating ON Apps(Rating);
+CREATE INDEX idx_price ON Apps(Price);
+CREATE INDEX idx_content_rating ON Apps(ContentRating);
+CREATE INDEX idx_installs ON Apps(Installs);
+CREATE INDEX idx_last_updated ON Apps(LastUpdated);
 END
 """)
 
 cursor.execute("""
-IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AppCategories2')
-CREATE TABLE AppCategories2 (
+IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AppCategories')
+CREATE TABLE AppCategories (
     AppID NVARCHAR(255),
     CategoryID INT,
     PRIMARY KEY (AppID, CategoryID),

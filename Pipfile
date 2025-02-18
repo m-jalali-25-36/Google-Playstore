@@ -8,6 +8,8 @@ streamlit = "*"
 pandas = "*"
 pyodbc = "*"
 matplotlib = "*"
+email-validator = "*"
+sqlalchemy = "*"
 
 [dev-packages]
 
