@@ -1,3 +1,5 @@
+import json
+from typing import List
 from fastapi import FastAPI, Query, HTTPException, Depends
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Date, ForeignKey, DECIMAL, BigInteger
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
@@ -16,13 +18,14 @@ class Developer(Base):
     DeveloperName = Column(String(255), unique=True, nullable=False)
     DeveloperEmail = Column(String(255))
     DeveloperWebsite = Column(String(500))
-    apps = relationship("Apps", back_populates="developer")
+    apps = relationship("App", back_populates="developer")
 
 class Category(Base):
     __tablename__ = "Categories"
     CategoryID = Column(Integer, primary_key=True, index=True, autoincrement=True)
     CategoryName = Column(String(100), unique=True, nullable=False)
-    
+    apps = relationship("App", secondary="AppCategories", back_populates="categories")
+
 class App(Base):
     __tablename__ = "Apps"
     AppID = Column(String(255), primary_key=True)
@@ -47,6 +50,7 @@ class App(Base):
     InAppPurchases = Column(Boolean)
     EditorsChoice = Column(Boolean)
     developer = relationship("Developer", back_populates="apps")
+    categories = relationship("Category", secondary="AppCategories", back_populates="apps")
 
 class AppCategory(Base):
     __tablename__ = "AppCategories"
@@ -69,6 +73,23 @@ class AppCreate(BaseModel):
     Currency: str
     Free: bool
     DeveloperID: int
+
+class CategoryBase(BaseModel):
+    CategoryID: int
+    CategoryName: str
+
+    class Config:
+        orm_mode = True 
+        from_attributes = True
+
+class AppBase(BaseModel):
+    AppID: str
+    AppName: str
+    Categories: List[CategoryBase] 
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
 
 # Dependency
 def get_db():
@@ -108,15 +129,15 @@ def get_app(app_id: str, db: Session = Depends(get_db)):
 def get_apps(
     page: int = Query(1, alias="page", ge=1),
     page_size: int = Query(10, alias="page_size", le=100),
-    category: str = None,
+    category_id: int = None,
     rating: float = None,
     price: float = None,
     content_rating: str = None,
     db: Session = Depends(get_db)):
-    query = db.query(App)
+    query = db.query(App).join(AppCategory).join(Category).join(Developer)
 
-    if category:
-        query = query.filter(App.Category == category)
+    if category_id:
+        query = query.filter(Category.CategoryID == category_id)
     if rating:
         query = query.filter(App.Rating >= rating)
     if price:
@@ -126,13 +147,14 @@ def get_apps(
 
     query = query.order_by(App.LastUpdated.desc())  
 
+    data = query.offset((page - 1) * page_size).limit(page_size).all()
+    data = [AppBase.from_orm(app) for app in data]
     return {
         "page": page,
         "page_size": page_size,
         "total": query.count(),
-        "apps": query.offset((page - 1) * page_size).limit(page_size).all()
+        "apps": data
     }
-
 
 @app.get("/apps/{app_id}")
 def get_app(app_id: str, db: Session = Depends(get_db)):
@@ -150,4 +172,23 @@ def delete_app(app_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"App {app_id} deleted successfully"}
 
+@app.get("/categores/")
+def get_categores(
+    page: int = Query(1, alias="page", ge=1),
+    page_size: int = Query(10, alias="page_size", le=100),
+    name: str = Query(None, alias="name"),
+    db: Session = Depends(get_db)):
+    query = db.query(Category)
+
+    if name:
+        query = query.filter(Category.CategoryName.ilike(f"%{name}%"))
+
+    query = query.order_by(Category.CategoryID.desc())  
+
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total": query.count(),
+        "categores": query.offset((page - 1) * page_size).limit(page_size).all()
+    }
 
